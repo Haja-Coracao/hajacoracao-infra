@@ -1,0 +1,30 @@
+# Terraform local state and generated files
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+tfplan-*
+*.tfplan
+*.tfplan-*
+
+# Generated archives and private keys
+*.zip
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local Python environment and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local secrets and editor/system files
+.env
+.env.*
+!.env.example
+*.secret
+*.credentials
+desktop.ini
+.vscode/
