@@ -1,5 +1,6 @@
 # Terraform local state and generated files
 .terraform/
+**/.terraform/
 *.tfstate
 *.tfstate.*
 tfplan
