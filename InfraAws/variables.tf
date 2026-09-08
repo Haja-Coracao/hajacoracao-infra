@@ -75,7 +75,7 @@ variable "environment" {
 # ========================================
 
 variable "common_tags" {
-  type = map(string)
+  type        = map(string)
   description = "Tags comuns para todos os recursos"
   default = {
     Project     = "Haja-Coracao"

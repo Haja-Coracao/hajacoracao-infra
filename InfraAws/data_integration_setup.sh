@@ -18,7 +18,9 @@ sudo apt-get install -y \
 python3 -m pip install --upgrade pip
 python3 -m pip install --no-cache-dir \
   pyspark==3.5.7 \
-  jupyterlab
+  jupyterlab \
+  pandas \
+  openpyxl
 
 ### Directories
 mkdir -p /opt/jupyter/notebook

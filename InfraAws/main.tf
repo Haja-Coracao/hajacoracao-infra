@@ -60,27 +60,18 @@ resource "random_string" "raw_suffix" {
   length  = 8
   special = false
   upper   = false
-  keepers = {
-    time = timestamp()
-  }
 }
 
 resource "random_string" "trusted_suffix" {
   length  = 8
   special = false
   upper   = false
-  keepers = {
-    time = timestamp()
-  }
 }
 
 resource "random_string" "client_suffix" {
   length  = 8
   special = false
   upper   = false
-  keepers = {
-    time = timestamp()
-  }
 }
 
 
@@ -121,21 +112,22 @@ resource "aws_security_group" "sg_data_integration" {
 # Instância EC2 com Data Integration
 resource "aws_instance" "ec2_data_integration" {
   ami                         = "ami-08c40ec9ead489470"
-  instance_type               = "t3.small"
+  instance_type               = var.pyspark_instance_type
   key_name                    = aws_key_pair.generated_key.key_name
   vpc_security_group_ids      = [aws_security_group.sg_data_integration.id]
   associate_public_ip_address = true
-  iam_instance_profile = "LabInstanceProfile"
+  iam_instance_profile        = "LabInstanceProfile"
 
   root_block_device {
-    volume_size = 30
-    volume_type = "gp2"
+    volume_size           = 30
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 
+  # Notebook
   provisioner "file" {
-    source      = "./dados.py"
-    destination = "/home/ubuntu/dados.py"
+    source      = "./Teste_PySpark/tratamento_batimentos_otimizado.ipynb"
+    destination = "${var.pyspark_project_dir}/${var.pyspark_notebook}"
 
     connection {
       type        = "ssh"
@@ -145,9 +137,41 @@ resource "aws_instance" "ec2_data_integration" {
     }
   }
 
+  # Gerador dos dados
   provisioner "file" {
-    source      = "./Teste_PySpark/pyspark_test.ipynb"
-    destination = "/home/ubuntu/pyspark_test.ipynb"
+    source      = "./Teste_PySpark/gerador_batimentos.py"
+    destination = "${var.pyspark_project_dir}/${var.pyspark_generator}"
+
+    connection {
+      type        = "ssh"
+      host        = self.public_ip
+      user        = "ubuntu"
+      private_key = tls_private_key.ssh_key.private_key_pem
+    }
+  }
+
+  # Tratamento PySpark
+  # provisioner "file" {
+  #   source      = "./Teste_PySpark/tratamento_batimentos.py"
+  #   destination = "${var.pyspark_project_dir}/${var.pyspark_processor}"
+
+  #   connection {
+  #     type        = "ssh"
+  #     host        = self.public_ip
+  #     user        = "ubuntu"
+  #     private_key = tls_private_key.ssh_key.private_key_pem
+  #   }
+  # }
+
+  # Gera automaticamente o XLSX
+  provisioner "remote-exec" {
+    inline = [
+      "until cloud-init status --wait; do sleep 5; done",
+      "sudo apt-get update -y",
+      "sudo apt-get install -y python3-pandas python3-openpyxl",
+      "sudo cp ${var.pyspark_project_dir}/${var.pyspark_notebook} /opt/jupyter/notebook/${var.pyspark_notebook}",
+      "python3 ${var.pyspark_project_dir}/${var.pyspark_generator}"
+    ]
 
     connection {
       type        = "ssh"
@@ -164,15 +188,61 @@ resource "aws_instance" "ec2_data_integration" {
   }
 }
 
+
+# ========================================
+# Variáveis para PySpark / Processamento BPM
+# ========================================
+
+variable "pyspark_instance_type" {
+  type        = string
+  description = "Tipo de instância EC2 utilizada para execução do PySpark"
+  default     = "t3.small"
+}
+
+variable "pyspark_ui_port" {
+  type        = number
+  description = "Porta da Spark UI"
+  default     = 4040
+}
+
+variable "pyspark_records" {
+  type        = number
+  description = "Quantidade de registros de batimentos a serem gerados"
+  default     = 500
+}
+
+variable "pyspark_project_dir" {
+  type        = string
+  description = "Diretório dos arquivos do projeto PySpark na EC2"
+  default     = "/home/ubuntu/Teste_PySpark"
+}
+
+variable "pyspark_notebook" {
+  type        = string
+  description = "Nome do notebook PySpark"
+  default     = "tratamento_batimentos_otimizado.ipynb"
+}
+
+variable "pyspark_generator" {
+  type        = string
+  description = "Nome do script responsável pela geração dos dados"
+  default     = "gerador_batimentos.py"
+}
+
+# variable "pyspark_processor" {
+#   type        = string
+#   description = "Nome do script responsável pelo tratamento dos dados"
+#   default     = "tratamento_batimentos.py"
+# }
 # DATA LAKE
 
 # Bucket Raw
 resource "aws_s3_bucket" "bucket-raw" {
-  bucket = lower("${var.bucket_raw_haja_coracao}-${random_string.raw_suffix.result}")
-  force_destroy  = true
+  bucket        = lower("${var.bucket_raw_haja_coracao}-${random_string.raw_suffix.result}")
+  force_destroy = true
 
   tags = {
-    Name        = "Bucket_RAW_HAJA_CORACAO"
+    Name = "Bucket_RAW_HAJA_CORACAO"
   }
 }
 
@@ -185,21 +255,21 @@ resource "aws_s3_object" "file_upload" {
 
 # Bucket Trusted
 resource "aws_s3_bucket" "bucket-trusted" {
-  bucket = lower("${var.bucket_trusted_haja_coracao}-${random_string.trusted_suffix.result}")
-  force_destroy  = true
+  bucket        = lower("${var.bucket_trusted_haja_coracao}-${random_string.trusted_suffix.result}")
+  force_destroy = true
 
   tags = {
-    Name        = "Bucket_TRUSTED_HAJA_CORACAO"
+    Name = "Bucket_TRUSTED_HAJA_CORACAO"
   }
 }
 
 # Bucket Client
 resource "aws_s3_bucket" "bucket-client" {
-  bucket = lower("${var.bucket_client_haja_coracao}-${random_string.client_suffix.result}")
-  force_destroy  = true
+  bucket        = lower("${var.bucket_client_haja_coracao}-${random_string.client_suffix.result}")
+  force_destroy = true
 
   tags = {
-    Name        = "Bucket_CLIENT_HAJA_CORACAO"
+    Name = "Bucket_CLIENT_HAJA_CORACAO"
   }
 }
 
@@ -274,8 +344,8 @@ resource "aws_instance" "ec2_kali" {
   associate_public_ip_address = true
 
   root_block_device {
-    volume_size = 30
-    volume_type = "gp2"
+    volume_size           = 30
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 
@@ -418,9 +488,9 @@ resource "aws_api_gateway_integration" "put_integration" {
   passthrough_behavior    = "WHEN_NO_MATCH"
 
   request_parameters = {
-    "integration.request.path.bucket"           = "method.request.path.bucket"
-    "integration.request.path.object"           = "context.requestId"
-    "integration.request.header.Content-Type"   = "'application/json'"
+    "integration.request.path.bucket"         = "method.request.path.bucket"
+    "integration.request.path.object"         = "context.requestId"
+    "integration.request.header.Content-Type" = "'application/json'"
   }
 }
 
