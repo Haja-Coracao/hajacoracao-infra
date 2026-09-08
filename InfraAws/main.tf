@@ -124,6 +124,20 @@ resource "aws_instance" "ec2_data_integration" {
     delete_on_termination = true
   }
 
+  # Cria o diretório antes dos provisioners file
+  provisioner "remote-exec" {
+    inline = [
+      "mkdir -p ${var.pyspark_project_dir}"
+    ]
+
+    connection {
+      type        = "ssh"
+      host        = self.public_ip
+      user        = "ubuntu"
+      private_key = tls_private_key.ssh_key.private_key_pem
+    }
+  }
+
   # Notebook
   provisioner "file" {
     source      = "./Teste_PySpark/tratamento_batimentos_otimizado.ipynb"
@@ -166,11 +180,9 @@ resource "aws_instance" "ec2_data_integration" {
   # Gera automaticamente o XLSX
   provisioner "remote-exec" {
     inline = [
-      "until cloud-init status --wait; do sleep 5; done",
-      "sudo apt-get update -y",
-      "sudo apt-get install -y python3-pandas python3-openpyxl",
-      "sudo cp ${var.pyspark_project_dir}/${var.pyspark_notebook} /opt/jupyter/notebook/${var.pyspark_notebook}",
-      "python3 ${var.pyspark_project_dir}/${var.pyspark_generator}"
+      "cloud-init status --wait >/tmp/haja-coracao-cloud-init.log 2>&1",
+      "sudo cp ${var.pyspark_project_dir}/${var.pyspark_notebook} /opt/jupyter/notebook/${var.pyspark_notebook} >/tmp/haja-coracao-provision.log 2>&1",
+      "python3 ${var.pyspark_project_dir}/${var.pyspark_generator} >/tmp/haja-coracao-gerador.log 2>&1"
     ]
 
     connection {
