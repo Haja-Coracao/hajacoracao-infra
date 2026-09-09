@@ -20,6 +20,24 @@ variable "bucket_client_haja_coracao" {
   default     = "haja-coracao-client"
 }
 
+variable "bucket_raw_name" {
+  type        = string
+  description = "Nome do bucket Raw existente criado fora do Terraform"
+  default     = "haja-coracao-raw"
+}
+
+variable "bucket_trusted_name" {
+  type        = string
+  description = "Nome do bucket Trusted existente criado fora do Terraform"
+  default     = "haja-coracao-trusted"
+}
+
+variable "bucket_client_name" {
+  type        = string
+  description = "Nome do bucket Client existente criado fora do Terraform"
+  default     = "haja-coracao-client"
+}
+
 # ========================================
 # Variáveis para Instâncias EC2
 # ========================================
@@ -34,6 +52,12 @@ variable "data_integration_instance_type" {
   type        = string
   description = "Tipo de instância EC2 para Data Integration"
   default     = "t3.small"
+}
+
+variable "spark_ui_cidr_blocks" {
+  type        = list(string)
+  description = "CIDRs autorizados a acessar a Spark UI na porta 4040"
+  default     = ["0.0.0.0/0"]
 }
 
 variable "kali_instance_type" {

@@ -55,26 +55,6 @@ resource "local_file" "private_key" {
   filename = "./${aws_key_pair.generated_key.key_name}.pem"
 }
 
-# Sufixos aleatórios para buckets
-resource "random_string" "raw_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
-resource "random_string" "trusted_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
-resource "random_string" "client_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
-
 ########################################################
 # Infraestrutura base da AWS
 # - 1 EC2
@@ -99,6 +79,13 @@ resource "aws_security_group" "sg_data_integration" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 4040
+    to_port     = 4040
+    protocol    = "tcp"
+    cidr_blocks = var.spark_ui_cidr_blocks
   }
 
   egress {
@@ -138,10 +125,22 @@ resource "aws_instance" "ec2_data_integration" {
     }
   }
 
-  # Notebook
+  # Notebooks completos para executar cada pipeline no Jupyter
   provisioner "file" {
     source      = "./Teste_PySpark/tratamento_batimentos_otimizado.ipynb"
     destination = "${var.pyspark_project_dir}/${var.pyspark_notebook}"
+
+    connection {
+      type        = "ssh"
+      host        = self.public_ip
+      user        = "ubuntu"
+      private_key = tls_private_key.ssh_key.private_key_pem
+    }
+  }
+
+  provisioner "file" {
+    source      = "./Teste_PySpark/tratamento_batimentos_baseline.ipynb"
+    destination = "${var.pyspark_project_dir}/${var.pyspark_baseline_notebook}"
 
     connection {
       type        = "ssh"
@@ -182,6 +181,7 @@ resource "aws_instance" "ec2_data_integration" {
     inline = [
       "cloud-init status --wait >/tmp/haja-coracao-cloud-init.log 2>&1",
       "sudo cp ${var.pyspark_project_dir}/${var.pyspark_notebook} /opt/jupyter/notebook/${var.pyspark_notebook} >/tmp/haja-coracao-provision.log 2>&1",
+      "sudo cp ${var.pyspark_project_dir}/${var.pyspark_baseline_notebook} /opt/jupyter/notebook/${var.pyspark_baseline_notebook} >>/tmp/haja-coracao-provision.log 2>&1",
       "python3 ${var.pyspark_project_dir}/${var.pyspark_generator} >/tmp/haja-coracao-gerador.log 2>&1"
     ]
 
@@ -231,8 +231,14 @@ variable "pyspark_project_dir" {
 
 variable "pyspark_notebook" {
   type        = string
-  description = "Nome do notebook PySpark"
+  description = "Nome do notebook PySpark otimizado"
   default     = "tratamento_batimentos_otimizado.ipynb"
+}
+
+variable "pyspark_baseline_notebook" {
+  type        = string
+  description = "Nome do notebook PySpark baseline"
+  default     = "tratamento_batimentos_baseline.ipynb"
 }
 
 variable "pyspark_generator" {
@@ -248,41 +254,11 @@ variable "pyspark_generator" {
 # }
 # DATA LAKE
 
-# Bucket Raw
-resource "aws_s3_bucket" "bucket-raw" {
-  bucket        = lower("${var.bucket_raw_haja_coracao}-${random_string.raw_suffix.result}")
-  force_destroy = true
-
-  tags = {
-    Name = "Bucket_RAW_HAJA_CORACAO"
-  }
-}
-
 # Upload de CSV para teste do PySpark
 resource "aws_s3_object" "file_upload" {
-  bucket = aws_s3_bucket.bucket-raw.id
+  bucket = var.bucket_raw_name
   key    = "dados-teste.csv"
   source = "./dados-teste.csv"
-}
-
-# Bucket Trusted
-resource "aws_s3_bucket" "bucket-trusted" {
-  bucket        = lower("${var.bucket_trusted_haja_coracao}-${random_string.trusted_suffix.result}")
-  force_destroy = true
-
-  tags = {
-    Name = "Bucket_TRUSTED_HAJA_CORACAO"
-  }
-}
-
-# Bucket Client
-resource "aws_s3_bucket" "bucket-client" {
-  bucket        = lower("${var.bucket_client_haja_coracao}-${random_string.client_suffix.result}")
-  force_destroy = true
-
-  tags = {
-    Name = "Bucket_CLIENT_HAJA_CORACAO"
-  }
 }
 
 ########################################################
@@ -364,7 +340,7 @@ resource "aws_instance" "ec2_kali" {
   user_data = templatefile("./kali_userdata.tpl", {
     scripts_zip_b64 = filebase64(data.archive_file.kali_scripts.output_path)
     kalilab_sh      = file("./kalilab.sh")
-    bucket_raw_name = aws_s3_bucket.bucket-raw.id
+    bucket_raw_name = var.bucket_raw_name
   })
 
   user_data_replace_on_change = true
@@ -580,7 +556,7 @@ resource "aws_lambda_function" "lambda_function_raw" {
   filename      = data.archive_file.lambda_raw_zip.output_path
   environment {
     variables = {
-      DEST_BUCKET = aws_s3_bucket.bucket-trusted.id
+      DEST_BUCKET = var.bucket_trusted_name
     }
   }
 
@@ -597,19 +573,19 @@ resource "aws_lambda_permission" "allow_s3_invoke_raw" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.lambda_function_raw.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.bucket-raw.arn
+  source_arn    = "arn:aws:s3:::${var.bucket_raw_name}"
 }
 
 # NOTIFICAÇÃO DO BUCKET (gatilho)
 resource "aws_s3_bucket_notification" "bucket_notification_raw" {
-  bucket = aws_s3_bucket.bucket-raw.id
+  bucket = var.bucket_raw_name
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.lambda_function_raw.arn
     events              = ["s3:ObjectCreated:*"]
   }
 
-  depends_on = [aws_lambda_permission.allow_s3_invoke_raw, aws_s3_bucket.bucket-raw]
+  depends_on = [aws_lambda_permission.allow_s3_invoke_raw]
 }
 
 ########################################################
@@ -632,7 +608,7 @@ resource "aws_lambda_function" "lambda_function_trusted" {
   filename      = data.archive_file.lambda_trusted_zip.output_path
   environment {
     variables = {
-      DEST_BUCKET = aws_s3_bucket.bucket-client.id
+      DEST_BUCKET = var.bucket_client_name
     }
   }
 
@@ -649,19 +625,19 @@ resource "aws_lambda_permission" "allow_s3_invoke_trusted" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.lambda_function_trusted.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.bucket-trusted.arn
+  source_arn    = "arn:aws:s3:::${var.bucket_trusted_name}"
 }
 
 # NOTIFICAÇÃO DO BUCKET (gatilho)
 resource "aws_s3_bucket_notification" "bucket_notification_trusted" {
-  bucket = aws_s3_bucket.bucket-trusted.id
+  bucket = var.bucket_trusted_name
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.lambda_function_trusted.arn
     events              = ["s3:ObjectCreated:*"]
   }
 
-  depends_on = [aws_lambda_permission.allow_s3_invoke_trusted, aws_s3_bucket.bucket-trusted]
+  depends_on = [aws_lambda_permission.allow_s3_invoke_trusted]
 }
 
 ########################################################
@@ -684,17 +660,17 @@ output "url_jupyter" {
 
 output "bucket_raw_name" {
   description = "Nome do Bucket Raw (dados brutos)"
-  value       = aws_s3_bucket.bucket-raw.id
+  value       = var.bucket_raw_name
 }
 
 output "bucket_trusted_name" {
   description = "Nome do Bucket Trusted (dados processados)"
-  value       = aws_s3_bucket.bucket-trusted.id
+  value       = var.bucket_trusted_name
 }
 
 output "bucket_client_name" {
   description = "Nome do Bucket Client (dados finalizados)"
-  value       = aws_s3_bucket.bucket-client.id
+  value       = var.bucket_client_name
 }
 
 output "lambda_raw_function_name" {
